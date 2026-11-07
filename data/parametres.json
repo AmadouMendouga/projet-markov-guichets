@@ -1,0 +1,14 @@
+{
+  "avertissement": "DONNEES FICTIVES mais realistes, choisies pour illustrer le modele. Elles ne proviennent d'aucune banque reelle.",
+  "pas_de_temps_minutes": 1,
+  "K": 8,
+  "s": 0.25,
+  "guichets": [1, 2, 3, 4, 5],
+  "seuil_attente_min": 1,
+  "periodes": {
+    "creuse": { "lambda_prio": 0.05, "lambda_ord": 0.20 },
+    "pointe": { "lambda_prio": 0.10, "lambda_ord": 0.45 }
+  },
+  "exemple_main": { "K": 2, "lambda": 0.3, "s": 0.4 },
+  "simulation": { "graine": 123, "pas": 400000, "rechauffement": 2000 }
+}

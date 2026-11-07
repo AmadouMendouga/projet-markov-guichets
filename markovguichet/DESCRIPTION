@@ -1,0 +1,19 @@
+Package: markovguichet
+Type: Package
+Title: Chaines de Markov pour une file d'attente de banque
+Version: 0.1.0
+Authors@R:
+    person("Yeline", "Fawa", email = "fawayeline@gmail.com", role = c("aut", "cre"))
+Description: Construit la matrice de transition d'une chaine de Markov qui
+    decrit une banque avec plusieurs guichets et des clients prioritaires.
+    Calcule la distribution stationnaire, des indicateurs d'attente (formule
+    de Little) et propose une simulation Monte Carlo de validation. Les
+    parametres fournis avec le package sont fictifs.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.0.0)
+Imports: jsonlite, stats
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.1

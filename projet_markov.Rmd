@@ -1,0 +1,221 @@
+---
+title: "Chaînes de Markov appliquées à la file d'attente d'une banque"
+subtitle: "Projet de Licence 3 SDIA — recherche opérationnelle — données fictives"
+author: "Yeline Fawa"
+lang: fr
+output:
+  word_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 150)
+for (f in c("modele", "simulation", "scenarios", "journee")) source(file.path("src", paste0(f, ".R")), encoding = "UTF-8")
+params <- charger_parametres("data/parametres.json")
+fr  <- function(x, d = 2) sub("\\.", ",", formatC(x, format = "f", digits = d))
+pct <- function(x, d = 1) paste0(fr(100 * x, d), " %")
+col_accent <- "#1F4E79"; col_2 <- "#C55A11"
+```
+
+> **Données fictives.** Tous les paramètres chiffrés viennent de `data/parametres.json` : ils sont inventés pour illustrer la méthode et ne décrivent aucune banque réelle. Tous les chiffres de ce document sont calculés par le code R ci-dessous.
+
+# 1. Le problème
+
+Dans une agence bancaire, les clients arrivent au hasard et la durée de leur opération varie. Quand il y a trop de monde pour le nombre de guichets ouverts, l'attente devient longue. **Combien de guichets faut-il ouvrir**, sachant qu'une partie des clients est prioritaire ?
+
+On répond avec les chaînes de Markov, dans le cadre de la théorie des files d'attente, une branche de la recherche opérationnelle.
+
+# 2. Rappel théorique
+
+**Chaîne de Markov.** Une suite d'états $X_0, X_1, X_2, \dots$ est une chaîne de Markov si le futur ne dépend du passé que par le présent :
+
+$$P(X_{n+1}=j \mid X_0,\dots,X_n=i) = P(X_{n+1}=j \mid X_n=i) = p_{ij}.$$
+
+**Matrice de transition.** $P=(p_{ij})$ a des coefficients $\ge 0$ et **chaque ligne somme à 1** : depuis l'état $i$, le système va forcément quelque part. Après $n$ pas, la loi est $\pi(n)=\pi(0)\,P^n$.
+
+**Distribution stationnaire.** C'est le vecteur $\pi$ (positif, de somme 1) tel que $\pi P=\pi$. Pour une chaîne finie irréductible, elle est unique ; si elle est aussi apériodique, la loi converge vers $\pi$ depuis n'importe quel état de départ.
+
+**Formule de Little.** $L=\lambda\,W$ : nombre moyen de clients = débit d'entrée $\times$ temps moyen passé dans le système.
+
+*Sources : [S1] Wikipedia « Markov chain », [S2] « Little's law », [S3] « Queueing theory » (consultées le 4 novembre 2026) ; Little (1961), Operations Research, 9(3), 383-387.*
+
+# 3. Le modèle
+
+- Un pas de temps = **1 minute**.
+- **État** $(a, b)$ : $a$ clients prioritaires et $b$ clients ordinaires dans la banque, avec $a+b \le K$. Ici $K = `r params$K`$.
+- À chaque minute : au plus **une arrivée** (prioritaire avec la probabilité $\lambda_p$, ordinaire avec $\lambda_o$), refusée si la banque est pleine.
+- Il y a $c$ guichets (de 1 à 5). Avec $m=\min(a+b,c)$ guichets occupés, **chaque guichet occupé termine son service avec la probabilité $s=`r fr(params$s, 2)`$, indépendamment des autres**.
+- Les **prioritaires sont servis d'abord**.
+- Arrivée et départ d'une même minute sont indépendants.
+
+Chaque ligne de $P$ est un produit de lois (arrivée, puis nombres de services terminés, de loi binomiale), chacune de somme 1 : elle somme donc à 1.
+
+# 4. Un exemple à la main : 3 états
+
+Une seule classe de clients, 1 guichet, capacité `r params$exemple_main$K`, $\lambda=`r fr(params$exemple_main$lambda, 1)`$, $s=`r fr(params$exemple_main$s, 1)`$.
+
+```{r exemple3}
+ex <- params$exemple_main
+P3 <- construire_P_simple(ex$K, ex$lambda, ex$s)
+P3
+rowSums(P3)            # chaque ligne somme à 1
+```
+
+Après deux minutes, la matrice est $P^2$ (produit de $P$ par elle-même) :
+
+```{r p2}
+P3 %*% P3
+```
+
+**Distribution stationnaire.** En isolant les flux entre états voisins : $0{,}30\,\pi_0 = 0{,}28\,\pi_1$ et $0{,}18\,\pi_1 = 0{,}40\,\pi_2$, donc $\pi = (56/143;\ 60/143;\ 27/143)$. Le code le confirme :
+
+```{r pi3}
+pi3 <- distribution_stationnaire(P3)
+round(pi3, 4)
+all.equal(unname(pi3), c(56, 60, 27) / 143)
+all.equal(as.numeric(pi3 %*% P3), unname(pi3))   # pi P = pi
+```
+
+À long terme, la banque est vide **`r pct(pi3[1])`** du temps et pleine **`r pct(pi3[3])`** du temps.
+
+# 5. Le cas complet : de 1 à 5 guichets
+
+## 5.1 La matrice de transition
+
+Exemple : heure de pointe, 2 guichets.
+
+```{r matrice}
+lp <- params$periodes$pointe$lambda_prio
+lo <- params$periodes$pointe$lambda_ord
+P  <- construire_P(params$K, c = 2, params$s, lp, lo)
+dim(P)                                  # nombre d'états
+range(rowSums(P))                       # toutes les lignes somment à 1
+n <- nrow(P)
+image(1:n, 1:n, t(P[n:1, ]), col = colorRampPalette(c("white", col_accent))(100),
+      xlab = "état d'arrivée j", ylab = "état de départ i", axes = FALSE,
+      main = "Matrice de transition P (pointe, 2 guichets)")
+box()
+```
+
+La matrice est creuse : on ne passe qu'aux états voisins.
+
+## 5.2 Distribution stationnaire et indicateurs
+
+```{r indicateurs}
+pv  <- distribution_stationnaire(P)
+ind <- indicateurs(P, pv, params$K, 2, params$s, lp, lo)
+c(somme = sum(pv), pi_P_egal_pi = isTRUE(all.equal(as.numeric(pv %*% P), unname(pv))))
+unlist(ind[c("p_pleine", "L", "Wq_p", "Wq_o", "occupation")])
+```
+
+Avec 2 guichets à la pointe, la banque est pleine `r pct(ind$p_pleine)` du temps et les clients ordinaires attendent en moyenne `r fr(ind$Wq_o, 1)` minutes (formule de Little : $W_q = L_q / \lambda_{\text{eff}}$).
+
+## 5.3 Convergence vers l'équilibre
+
+```{r convergence}
+v <- c(1, rep(0, nrow(P) - 1)); d <- numeric(151)
+d[1] <- 0.5 * sum(abs(v - pv))
+for (k in 1:150) { v <- as.numeric(v %*% P); d[k + 1] <- 0.5 * sum(abs(v - pv)) }
+plot(0:150, d, type = "l", log = "y", lwd = 3, col = col_accent,
+     xlab = "minutes n", ylab = "distance à π (échelle log)",
+     main = "En partant d'une banque vide")
+grid()
+```
+
+## 5.4 Les 10 scénarios
+
+```{r scenarios}
+sc <- lancer_scenarios(params)
+g_ <- function(per, c) sc$Wq_ord[sc$periode == per & sc$guichets == c]
+tab <- data.frame(Période = ifelse(sc$periode == "creuse", "Creuse", "Pointe"),
+                  Guichets = sc$guichets, Charge = fr(sc$charge, 2),
+                  `Attente ordinaires (min)` = fr(sc$Wq_ord, 2),
+                  `Attente prioritaires (min)` = fr(sc$Wq_prio, 3),
+                  `Banque pleine` = pct(sc$p_pleine, 2),
+                  check.names = FALSE)
+knitr::kable(tab, align = "lcccrr")
+```
+
+La *charge* est le rapport entre les arrivées et la capacité de service, $(\lambda_p+\lambda_o)/(c\,s)$.
+
+```{r graph-scenarios, fig.height = 4}
+op <- par(mfrow = c(1, 2), mar = c(4.5, 4.5, 3, 1))
+ymax <- max(sc$Wq_ord) * 1.1
+for (per in c("creuse", "pointe")) {
+  d <- sc[sc$periode == per, ]
+  barplot(d$Wq_ord, names.arg = d$guichets, xlab = "nombre de guichets", ylim = c(0, ymax),
+          col = if (per == "creuse") "#5B8DB8" else col_2,
+          ylab = "attente des ordinaires (min)", main = paste("Heure", per))
+}
+par(op)
+```
+
+**Lecture.** À la pointe, les clients ordinaires attendent `r fr(g_("pointe",1), 1)` min avec 1 guichet, `r fr(g_("pointe",2), 1)` min avec 2, `r fr(g_("pointe",3), 2)` min avec 3, `r fr(g_("pointe",4), 2)` min avec 4 et `r fr(g_("pointe",5), 2)` min avec 5. Les prioritaires attendent très peu dans tous les cas : la priorité les protège, mais elle reporte l'attente sur les clients ordinaires.
+
+```{r besoin}
+seuil  <- params$seuil_attente_min          # seuil fictif, choisi pour l'exemple
+besoin <- guichets_necessaires(sc, seuil)   # plus petit nombre de guichets sous le seuil
+besoin
+```
+
+Avec un seuil d'attente de `r fr(seuil, 0)` minute pour les clients ordinaires (valeur fictive), il faut **`r besoin["creuse"]` guichets en heure creuse** et **`r besoin["pointe"]` à l'heure de pointe**. Un cinquième guichet ne ferait gagner que `r fr(g_("pointe", besoin["pointe"]) - g_("pointe", 5), 2)` minute à la pointe.
+
+# 6. Validation par simulation Monte Carlo
+
+La simulation tire au hasard arrivées et départs, minute par minute, **sans utiliser la matrice $P$**. Si elle retombe sur $\pi$, la matrice est correcte.
+
+```{r simulation}
+sm  <- params$simulation
+sim <- simuler_banque(params$K, 2, params$s, lp, lo, sm$pas, sm$graine, sm$rechauffement)
+pis <- frequences_dans_ordre(sim, attr(P, "etats"))
+ecart_max <- max(abs(pis - pv))
+ecart_max
+barplot(rbind(pv, pis), beside = TRUE, col = c(col_accent, col_2), names.arg = seq_along(pv),
+        cex.names = 0.6, xlab = "indice de l'état (a, b)", ylab = "probabilité",
+        main = "Calcul (bleu) et simulation (orange)")
+```
+
+Sur `r format(sim$nb_pas, big.mark = " ")` minutes simulées, l'écart maximal avec la distribution calculée est de **`r fr(ecart_max, 4)`** : les deux méthodes concordent.
+
+## 6.2 Une journée à l'agence, client par client
+
+On joue une vraie journée (lundi de 8 h à 16 h, pointe de 11 h à 14 h) : chaque client est suivi un par un. Les clients sont les mêmes avec 1 et 4 guichets.
+
+```{r journee, fig.height = 5.5}
+profil <- profil_journee(params)
+j1 <- simuler_clients(params$K, 1, params$s, profil$lp, profil$lo, graine = 2026)
+j4 <- simuler_clients(params$K, 4, params$s, profil$lp, profil$lo, graine = 2026)
+knitr::kable(rbind(resumer_journee(j1, 1), resumer_journee(j4, 4)))
+op <- par(mfrow = c(2, 1))
+dessiner_journee(j1, 1, profil, params$K)
+dessiner_journee(j4, 4, profil, params$K)
+par(op)
+```
+
+Avec 1 guichet, la salle reste pleine à l'heure de pointe et des clients sont refusés. Avec 4 guichets, presque personne n'attend.
+
+# 7. Limites
+
+- Au plus une arrivée par minute (simplification du temps continu).
+- Services de loi géométrique, sans mémoire.
+- Clients patients : personne ne quitte la file.
+- Arrivées indépendantes, paramètres constants dans une période.
+- Dans la journée simulée, un service commencé n'est jamais interrompu ; la matrice suppose au contraire qu'un prioritaire peut prendre la place d'un ordinaire (voir la documentation du modèle).
+- Données fictives : à estimer sur le terrain pour une vraie agence.
+
+# 8. Conclusion
+
+Une chaîne de Markov à `r nrow(P)` états décrit la banque. Sa matrice de transition permet de calculer exactement la distribution stationnaire, l'attente moyenne et la probabilité que la banque soit pleine. Sur nos données fictives, avec un seuil d'attente de `r fr(seuil, 0)` minute pour les clients ordinaires, **`r besoin["creuse"]` guichets suffisent en heure creuse et `r besoin["pointe"]` à l'heure de pointe**. Un cinquième guichet apporterait très peu.
+
+# Sources
+
+- [S1] Wikipedia, « Markov chain », https://en.wikipedia.org/wiki/Markov_chain (consulté le 4 novembre 2026).
+- [S2] Wikipedia, « Little's law », https://en.wikipedia.org/wiki/Little%27s_law (consulté le 4 novembre 2026).
+- [S3] Wikipedia, « Queueing theory », https://en.wikipedia.org/wiki/Queueing_theory (consulté le 4 novembre 2026).
+- J. D. C. Little (1961), *A Proof for the Queuing Formula: L = λW*, Operations Research, 9(3), 383-387.
+- Pour approfondir : Grinstead et Snell, *Introduction to Probability*, chapitre 11.
